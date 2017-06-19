@@ -13,58 +13,58 @@ Bu [linkte](http://archivio-meteo.distile.it/ajax-charts.php?citta_id=4071&dal=0
 04012000,-3.0,9.7
 …
 
-package utils;
-
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonToken;
-
-import java.io.File;
-
-
-public class JsonToCsvConverter {
-
-    public static void main(String[] args) throws Exception {
-        System.out.println(JsonToCsvConverter.convert());
-    }
-
-    public static String convert() throws Exception {
-        JsonFactory f = new JsonFactory();
-        JsonParser jp = f.createJsonParser(new File("src/main/java/utils/milano_temp.json"));
-        StringBuilder builder = new StringBuilder();
-        while (jp.nextToken() != JsonToken.END_ARRAY) {
-            while (jp.nextToken() != JsonToken.END_OBJECT) {
-                jp.nextToken();
-                while (jp.nextToken() != JsonToken.END_ARRAY) {
-
-                    builder.append(getRow(jp));
+    package utils;
+    
+    import com.fasterxml.jackson.core.JsonFactory;
+    import com.fasterxml.jackson.core.JsonParser;
+    import com.fasterxml.jackson.core.JsonToken;
+    
+    import java.io.File;
+    
+    
+    public class JsonToCsvConverter {
+    
+        public static void main(String[] args) throws Exception {
+            System.out.println(JsonToCsvConverter.convert());
+        }
+    
+        public static String convert() throws Exception {
+            JsonFactory f = new JsonFactory();
+            JsonParser jp = f.createJsonParser(new File("src/main/java/utils/milano_temp.json"));
+            StringBuilder builder = new StringBuilder();
+            while (jp.nextToken() != JsonToken.END_ARRAY) {
+                while (jp.nextToken() != JsonToken.END_OBJECT) {
+                    jp.nextToken();
+                    while (jp.nextToken() != JsonToken.END_ARRAY) {
+    
+                        builder.append(getRow(jp));
+                    }
                 }
             }
+            jp.close();
+            return builder.toString();
         }
-        jp.close();
-        return builder.toString();
+    
+        private static String getRow(JsonParser jp) throws Exception {
+    
+            StringBuilder builder = new StringBuilder();
+    
+            jp.nextToken();
+            jp.nextValue();
+            builder.append(jp.getValueAsString()).append(",");
+            jp.nextToken();
+            jp.nextToken();
+            jp.nextValue();
+            builder.append(jp.getValueAsDouble()).append(",");
+            jp.nextToken();
+            jp.nextToken();
+            jp.nextValue();
+            builder.append(jp.getValueAsDouble()).append("\n");
+            jp.nextToken();
+    
+            return builder.toString();
+        }
     }
-
-    private static String getRow(JsonParser jp) throws Exception {
-
-        StringBuilder builder = new StringBuilder();
-
-        jp.nextToken();
-        jp.nextValue();
-        builder.append(jp.getValueAsString()).append(",");
-        jp.nextToken();
-        jp.nextToken();
-        jp.nextValue();
-        builder.append(jp.getValueAsDouble()).append(",");
-        jp.nextToken();
-        jp.nextToken();
-        jp.nextValue();
-        builder.append(jp.getValueAsDouble()).append("\n");
-        jp.nextToken();
-
-        return builder.toString();
-    }
-}
 
 01012000,0,10.0
 02012000,0,20.0
@@ -76,79 +76,84 @@ public class JsonToCsvConverter {
 
 Kullanılan mapper sınıfına kısaca bakalım; ilk olarak mapper sınıfına veriler formata uygun olarak ayrılıp ekleniyor. Eğer alınan veriler aşırı miktarda ise bunları map ediyoruz. Ortlamaları hesaplamak için  SumCount sınıfını yazdık bu sınıfa aşağıda linkte verilen kaynak koddan ulaşabilirsiniz.
 
-    public static class MeanMapper extends Mapper<Object, Text, Text, SumCount> {
+   
 
-    private final int DATE = 0;
-    private final int MIN = 1;
-    private final int MAX = 2;
-
-    private Map<Text, List<Double>> maxMap = new HashMap<>();
- 
-    @Override
-    public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
-
-        String[] values = value.toString().split((","));
-
-        if (values.length != 3) {
-            return;
-        }
-
-        String date = values[DATE];
-        Text month = new Text(date.substring(2));
-        Double max = Double.parseDouble(values[MAX]);
-
-        if (!maxMap.containsKey(month)) {
-            maxMap.put(month, new ArrayList<Double>());
-        }
-
-        maxMap.get(month).add(max);
-    }
-
-    @Override
-    protected void cleanup(Context context) throws IOException, InterruptedException {
-
-        for (Text month: maxMap.keySet()) {
-
-            List<Double> temperatures = maxMap.get(month);
-
-            Double sum = 0d;
-            for (Double max: temperatures) {
-                sum += max;
+     public static class MeanMapper extends Mapper<Object, Text, Text, SumCount> {
+    
+        private final int DATE = 0;
+        private final int MIN = 1;
+        private final int MAX = 2;
+    
+        private Map<Text, List<Double>> maxMap = new HashMap<>();
+     
+        @Override
+        public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
+    
+            String[] values = value.toString().split((","));
+    
+            if (values.length != 3) {
+                return;
             }
-
-            context.write(month, new SumCount(sum, temperatures.size()));
+    
+            String date = values[DATE];
+            Text month = new Text(date.substring(2));
+            Double max = Double.parseDouble(values[MAX]);
+    
+            if (!maxMap.containsKey(month)) {
+                maxMap.put(month, new ArrayList<Double>());
+            }
+    
+            maxMap.get(month).add(max);
+        }
+    
+        @Override
+        protected void cleanup(Context context) throws IOException, InterruptedException {
+    
+            for (Text month: maxMap.keySet()) {
+    
+                List<Double> temperatures = maxMap.get(month);
+    
+                Double sum = 0d;
+                for (Double max: temperatures) {
+                    sum += max;
+                }
+    
+                context.write(month, new SumCount(sum, temperatures.size()));
+            }
         }
     }
-}
 
 Reducer sınıfı basit olarak  mapperlardan dönen işlenmiş SumCount objelerini,ayları ve ortalamaları bir araya getirerek bunları birleştirir.
 
-    public static class MeanReducer extends Reducer {
+   
 
-    private Map sumCountMap = new HashMap<>();
-
-    @Override
-    public void reduce(Text key, Iterable values, Context context) throws IOException, InterruptedException {
-
-        SumCount totalSumCount = new SumCount();
-
-        for (SumCount sumCount : values) {
-
-            totalSumCount.addSumCount(sumCount);
+     public static class MeanReducer extends Reducer {
+    
+        private Map sumCountMap = new HashMap<>();
+    
+        @Override
+        public void reduce(Text key, Iterable values, Context context) throws IOException, InterruptedException {
+    
+            SumCount totalSumCount = new SumCount();
+    
+            for (SumCount sumCount : values) {
+    
+                totalSumCount.addSumCount(sumCount);
+            }
+    
+            sumCountMap.put(new Text(key), totalSumCount);
         }
-
-        sumCountMap.put(new Text(key), totalSumCount);
+    
+        @Override
+        protected void cleanup(Context context) throws IOException, InterruptedException {
+    
+            for (Text month: sumCountMap.keySet()) {
+    
+                double sum = sumCountMap.get(month).getSum().get();
+                int count = sumCountMap.get(month).getCount().get();
+    
+                context.write(month, new DoubleWritable(sum/count));
+            }
+        }
     }
 
-    @Override
-    protected void cleanup(Context context) throws IOException, InterruptedException {
-
-        for (Text month: sumCountMap.keySet()) {
-
-            double sum = sumCountMap.get(month).getSum().get();
-            int count = sumCountMap.get(month).getCount().get();
-
-            context.write(month, new DoubleWritable(sum/count));
-        }
-    }
-}
